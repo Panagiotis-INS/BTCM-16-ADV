@@ -44,12 +44,6 @@
       args:
         creates: /root/sliver-server
 
-    - name: Install Sliver C2 client binary to /usr/local/bin
-      ansible.builtin.get_url:
-        url: https://github.com/BishopFox/sliver/releases/latest/download/sliver-client_linux
-        dest: /usr/local/bin/sliver
-        mode: "0755"
-
     - name: Ensure Sliver C2 server is enabled and running as a service
       ansible.builtin.systemd:
         name: sliver
