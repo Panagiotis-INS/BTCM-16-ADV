@@ -1,0 +1,171 @@
+- name: Configure axvm
+  hosts: axvm
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Wait for SSH to accept connections
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        sleep: 10
+        timeout: 900
+  roles:
+    - role: ansible-role-user-access
+      user_access_username: analyst
+      user_access_password: Password123!
+      user_access_admin: True
+  tasks:
+    - name: Install forensic and analysis tooling
+      ansible.builtin.apt:
+        name:
+          - curl
+          - git
+          - autopsy
+          - sleuthkit
+          - volatility3
+          - foremost
+          - binutils
+          - cifs-utils
+          - smbclient
+        state: present
+        update_cache: true
+
+    - name: Ensure Investigation mount point exists
+      ansible.builtin.file:
+        path: /mnt/investigation
+        state: directory
+        mode: "0755"
+
+    - name: Download Sliver C2 GitHub install script
+      ansible.builtin.get_url:
+        url: https://sliver.sh/install
+        dest: /tmp/sliver-install.sh
+        mode: "0755"
+        force: true
+
+    - name: Install Sliver C2 via official install script
+      ansible.builtin.command: /tmp/sliver-install.sh
+      args:
+        creates: /root/sliver-server
+
+    - name: Install Sliver C2 client binary to /usr/local/bin
+      ansible.builtin.get_url:
+        url: https://github.com/BishopFox/sliver/releases/latest/download/sliver-client_linux
+        dest: /usr/local/bin/sliver
+        mode: "0755"
+
+    - name: Ensure Sliver C2 server is enabled and running as a service
+      ansible.builtin.systemd:
+        name: sliver
+        daemon_reload: true
+        enabled: true
+        state: started
+
+- name: Configure wvvm
+  hosts: wvvm
+  gather_facts: false
+  pre_tasks:
+    - name: Wait for PSRP listener to accept connections
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        sleep: 10
+        timeout: 900
+  roles:
+    - role: ansible-role-user-access-windows
+      user_access_username: LocalAdmin
+      user_access_password: Password123!
+      user_access_rdp: True
+      user_access_admin: True
+  tasks:
+    - name: Disable Windows Defender real-time monitoring and engine via policy
+      ansible.windows.win_regedit:
+        path: "{{ item.path }}"
+        name: "{{ item.name }}"
+        data: 1
+        type: dword
+      loop:
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender', name: DisableAntiSpyware }
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender', name: DisableAntiVirus }
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', name: DisableRealtimeMonitoring }
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', name: DisableBehaviorMonitoring }
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', name: DisableOnAccessProtection }
+        - { path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection', name: DisableScanOnRealtimeEnable }
+
+    - name: Disable Defender preferences via Set-MpPreference
+      ansible.windows.win_shell: |
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+        Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+        Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+        Set-MpPreference -MAPSReporting Disabled -ErrorAction SilentlyContinue
+        Set-MpPreference -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue
+      changed_when: false
+      failed_when: false
+
+    - name: Uninstall Windows-Defender feature
+      ansible.windows.win_feature:
+        name: Windows-Defender
+        state: absent
+      register: defender_feature
+
+    - name: Reboot if Defender removal requires it
+      ansible.windows.win_reboot:
+      when: defender_feature.reboot_required | default(false)
+
+    - name: Ensure DumpIt destination exists
+      ansible.windows.win_file:
+        path: C:\Tools\DumpIt
+        state: directory
+
+    - name: Download DumpIt for Windows
+      ansible.windows.win_get_url:
+        url: https://github.com/thimbleweed/All-In-USB/raw/master/utilities/DumpIt/DumpIt.exe
+        dest: C:\Tools\DumpIt\DumpIt.exe
+
+    - name: Create DumpIt shortcut on the public Desktop
+      community.windows.win_shortcut:
+        src: C:\Tools\DumpIt\DumpIt.exe
+        dest: C:\Users\Public\Desktop\DumpIt.lnk
+        description: DumpIt - Memory acquisition tool
+
+    - name: Ensure Strings destination exists
+      ansible.windows.win_file:
+        path: C:\Tools\Strings
+        state: directory
+
+    - name: Download Sysinternals Strings
+      ansible.windows.win_get_url:
+        url: https://download.sysinternals.com/files/Strings.zip
+        dest: C:\Windows\Temp\Strings.zip
+
+    - name: Extract Strings
+      community.windows.win_unzip:
+        src: C:\Windows\Temp\Strings.zip
+        dest: C:\Tools\Strings
+
+    - name: Remove temp files
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\Strings.zip
+        state: absent
+
+    - name: Ensure Investigation share directory exists
+      ansible.windows.win_file:
+        path: C:\Investigation
+        state: directory
+
+    - name: Grant Everyone Modify on Investigation folder (NTFS)
+      ansible.windows.win_acl:
+        path: C:\Investigation
+        user: Everyone
+        rights: Modify
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+
+    - name: Create Investigation SMB share with Everyone read/write
+      ansible.windows.win_share:
+        name: investigation
+        path: C:\Investigation
+        description: Forensic investigation share (read/write for Everyone)
+        change: Everyone
+        read: Everyone
+        state: present

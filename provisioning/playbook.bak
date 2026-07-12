@@ -1,0 +1,118 @@
+# ─────────────────────────────────────────────
+#  MACHINE 1 - wavm (Windows 10 - Analyst Workstation)
+# ─────────────────────────────────────────────
+- name: init machine wavm
+  hosts:
+    - wavm
+  gather_facts: yes
+  vars:
+    ansible_connection: psrp
+    ansible_psrp_protocol: https
+    ansible_psrp_cert_validation: ignore
+    ansible_port: 5986
+  pre_tasks:
+    - name: Wait for PSRP listener to accept connections
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        sleep: 10
+        timeout: 900
+
+  tasks:
+    # ─── Chocolatey bootstrap ────────────────────────────────────
+    - name: Install Chocolatey
+      ansible.windows.win_shell: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force;
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+      args:
+        creates: C:\ProgramData\chocolatey\bin\choco.exe
+
+    # ─── Git, FTK Imager, Autopsy, Strawberry Perl via Chocolatey ──
+    # Chocolatey packages are version-agnostic and self-updating —
+    # no hardcoded URLs that can go stale.
+    - name: Install Git, FTK Imager, Autopsy, and Strawberry Perl via Chocolatey
+      chocolatey.chocolatey.win_chocolatey:
+        name:
+          - git
+          - ftk-imager
+          - autopsy
+          - strawberryperl
+        state: present
+
+    # ─── RegRipper 4.0 ───────────────────────────────────────────
+    - name: Ensure C:\Tools directory exists
+      ansible.windows.win_file:
+        path: C:\Tools
+        state: directory
+
+    - name: Clone RegRipper 4.0 from GitHub
+      ansible.windows.win_shell: |
+        git clone https://github.com/keydet89/RegRipper4.0.git C:\Tools\RegRipper4.0
+      args:
+        creates: C:\Tools\RegRipper4.0\rip.pl
+
+    # ─── Registry Explorer (Eric Zimmermann / EZ Tools) ──────────
+    # Sourced from the official EZ Tools GitHub releases page —
+    # more stable than the Backblaze CDN link.
+    # If this goes stale verify at: https://ericzimmerman.github.io/#!index.md
+    - name: Download Registry Explorer ZIP from EZ Tools GitHub releases
+      ansible.windows.win_get_url:
+        url: https://github.com/EricZimmerman/RegistryExplorer/releases/latest/download/RegistryExplorer.zip
+        dest: C:\Windows\Temp\RegistryExplorer.zip
+
+    - name: Ensure Registry Explorer destination exists
+      ansible.windows.win_file:
+        path: C:\Tools\RegistryExplorer
+        state: directory
+
+    - name: Extract Registry Explorer
+      community.windows.win_unzip:
+        src: C:\Windows\Temp\RegistryExplorer.zip
+        dest: C:\Tools\RegistryExplorer
+        creates: C:\Tools\RegistryExplorer\RegistryExplorer.exe
+
+    - name: Remove Registry Explorer ZIP
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\RegistryExplorer.zip
+        state: absent
+
+  # ─── Role ─────────────────────────────────────────────────────
+  roles:
+    - name: ansible-role-user-access-windows
+      user_access_username: user
+      user_access_password: Password123
+      user_access_rdp: True
+      user_access_admin: True
+      
+
+# ─────────────────────────────────────────────
+#  MACHINE 2 - wvvm (Windows Server 2019 - Victim/Evidence Machine)
+# ─────────────────────────────────────────────
+- name: init machine wvvm
+  hosts:
+    - wvvm
+  gather_facts: yes
+  vars:
+    ansible_connection: psrp
+    ansible_psrp_protocol: https
+    ansible_psrp_cert_validation: ignore
+    ansible_port: 5986
+  pre_tasks:
+    - name: Wait for PSRP listener to accept connections
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        sleep: 10
+        timeout: 900
+
+  tasks:
+    - name: No additional software provisioned for wvvm
+      ansible.builtin.debug:
+        msg: "wvvm is a bare Windows Server 2019 machine — no extra software installed."
+
+  # ─── Role ─────────────────────────────────────────────────────
+  roles:
+    - name: ansible-role-user-access-windows
+      user_access_username: user
+      user_access_password: Password123
+      user_access_rdp: True
+      user_access_admin: True
