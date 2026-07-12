@@ -1,4 +1,4 @@
-name: btcmp16-windows
+name: btcmp16-avd-5
 hosts:
   - name: axvm
     flavor: c4_r8_d60

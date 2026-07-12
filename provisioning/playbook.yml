@@ -19,9 +19,6 @@
         name:
           - curl
           - git
-          - autopsy
-          - sleuthkit
-          - volatility3
           - foremost
           - binutils
           - cifs-utils
