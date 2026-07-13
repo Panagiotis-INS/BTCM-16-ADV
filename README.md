@@ -19,7 +19,7 @@ This lab environment is built around **Digital Forensics** scenarios.
 ## Machines
 
 ### AXVM — Analyst Workstation (Xubuntu Noble)
-User `analyst` / `Password123!` (sudoer, SSH enabled).
+User `attacker` / `Password123!` (sudoer, SSH enabled).
 
 **Software (via apt):**
 - git

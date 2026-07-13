@@ -10,10 +10,19 @@
         timeout: 900
   roles:
     - role: ansible-role-user-access
-      user_access_username: analyst
+      user_access_username: attacker
       user_access_password: Password123!
       user_access_admin: True
   tasks:
+    - name: Grant attacker unrestricted sudo (NOPASSWD ALL)
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/attacker
+        content: "attacker ALL=(ALL) NOPASSWD:ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
     - name: Install forensic and analysis tooling
       ansible.builtin.apt:
         name:
@@ -23,6 +32,7 @@
           - binutils
           - cifs-utils
           - smbclient
+          - terminator
         state: present
         update_cache: true
 
