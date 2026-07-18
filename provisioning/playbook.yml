@@ -77,6 +77,14 @@
       user_access_rdp: True
       user_access_admin: True
   tasks:
+    - name: Ensure TermService is running before RDP handler fires
+      ansible.windows.win_service:
+        name: TermService
+        state: started
+
+    - name: Flush pending handlers now (prevents deferred RDP restart hang at end of play)
+      ansible.builtin.meta: flush_handlers
+
     - name: Disable Windows Defender real-time monitoring and engine via policy
       ansible.windows.win_regedit:
         path: "{{ item.path }}"
